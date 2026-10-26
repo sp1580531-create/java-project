@@ -1,0 +1,1783 @@
+================================================================================
+PROJECT SUMMARY: Full Banking Application Codebase (Frontend + Backend)
+Total Files: 62
+Generated: 2026-10-23 21:55:28
+================================================================================
+
+================================================================================
+FILE: .gitignore
+================================================================================
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+*.log
+
+# Java / Backend
+backend/target/
+*.class
+
+# IDE & OS
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+
+================================================================================
+FILE: backend/pom.xml
+================================================================================
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<modelVersion>4.0.0</modelVersion>
+
+<parent>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-parent</artifactId>
+<version>3.2.4</version>
+<relativePath/>
+</parent>
+
+<groupId>com.demo</groupId>
+<artifactId>bank</artifactId>
+<version>0.0.1-SNAPSHOT</version>
+<name>bank</name>
+<description>Demo Banking Application</description>
+
+<properties>
+<java.version>21</java.version>
+<lombok.version>1.18.42</lombok.version>
+</properties>
+
+<dependencies>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-validation</artifactId>
+</dependency>
+<dependency>
+<groupId>com.h2database</groupId>
+<artifactId>h2</artifactId>
+<scope>runtime</scope>
+</dependency>
+<dependency>
+<groupId>org.projectlombok</groupId>
+<artifactId>lombok</artifactId>
+<optional>true</optional>
+</dependency>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-test</artifactId>
+<scope>test</scope>
+</dependency>
+</dependencies>
+
+<build>
+<plugins>
+<plugin>
+<groupId>org.apache.maven.plugins</groupId>
+<artifactId>maven-compiler-plugin</artifactId>
+<configuration>
+<annotationProcessorPaths>
+<path>
+<groupId>org.projectlombok</groupId>
+<artifactId>lombok</artifactId>
+<version>${lombok.version}</version>
+</path>
+</annotationProcessorPaths>
+</configuration>
+</plugin>
+<plugin>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-maven-plugin</artifactId>
+<configuration>
+<excludes>
+<exclude>
+<groupId>org.projectlombok</groupId>
+<artifactId>lombok</artifactId>
+</exclude>
+</excludes>
+</configuration>
+</plugin>
+</plugins>
+</build>
+</project>
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/BankApplication.java
+================================================================================
+package com.demo.bank;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class BankApplication {
+public static void main(String[] args) {
+SpringApplication.run(BankApplication.class, args);
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/config/CorsConfig.java
+================================================================================
+package com.demo.bank.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class CorsConfig implements WebMvcConfigurer {
+
+@Override
+public void addCorsMappings(CorsRegistry registry) {
+registry.addMapping("/api/**")
+.allowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*", "https://*.netlify.app", "https://nexbankings.netlify.app")
+.allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+.allowedHeaders("*")
+.allowCredentials(false);
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/controller/AccountController.java
+================================================================================
+package com.demo.bank.controller;
+
+import com.demo.bank.dto.AccountResponse;
+import com.demo.bank.dto.CreateAccountRequest;
+import com.demo.bank.entity.Account;
+import com.demo.bank.repository.AccountRepository;
+import com.demo.bank.repository.UserRepository;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Random;
+
+@RestController
+@RequestMapping("/api/accounts")
+@RequiredArgsConstructor
+public class AccountController {
+
+private final AccountRepository accountRepository;
+private final UserRepository userRepository;
+private final com.demo.bank.repository.TransactionRepository transactionRepository;
+
+@GetMapping
+public ResponseEntity<List<AccountResponse>> getAccounts(@RequestParam Long userId) {
+List<AccountResponse> accounts = accountRepository.findByUserId(userId)
+.stream().map(AccountResponse::from).toList();
+return ResponseEntity.ok(accounts);
+}
+
+@GetMapping("/lookup")
+public ResponseEntity<AccountResponse> lookupAccount(@RequestParam String accountNumber) {
+return accountRepository.findByAccountNumber(accountNumber)
+.map(AccountResponse::from)
+.map(ResponseEntity::ok)
+.orElse(ResponseEntity.notFound().build());
+}
+
+@PostMapping("/create")
+public ResponseEntity<AccountResponse> createAccount(@Valid @RequestBody CreateAccountRequest req) {
+var user = userRepository.findById(req.getUserId())
+.orElseThrow(() -> new RuntimeException("User not found"));
+
+BigDecimal minBalance = req.getAccountType() == Account.AccountType.SAVINGS
+? BigDecimal.valueOf(500) : BigDecimal.valueOf(1000);
+
+Account account = Account.builder()
+.accountNumber(generateAccountNumber())
+.accountType(req.getAccountType())
+.balance(req.getInitialDeposit())
+.minimumBalance(minBalance)
+.availableCredit(BigDecimal.valueOf(10000))
+.status(Account.AccountStatus.ACTIVE)
+.createdAt(LocalDateTime.now())
+.user(user)
+.build();
+
+accountRepository.save(account);
+
+if (req.getInitialDeposit() != null && req.getInitialDeposit().compareTo(BigDecimal.ZERO) > 0) {
+com.demo.bank.entity.Transaction initialTx = com.demo.bank.entity.Transaction.builder()
+.type(com.demo.bank.entity.Transaction.TransactionType.DEPOSIT)
+.amount(req.getInitialDeposit())
+.balanceAfter(req.getInitialDeposit())
+.description("Initial Deposit - Account Opening")
+.category("Deposit")
+.status(com.demo.bank.entity.Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now())
+.account(account)
+.build();
+transactionRepository.save(initialTx);
+}
+
+return ResponseEntity.ok(AccountResponse.from(account));
+}
+
+private String generateAccountNumber() {
+String prefix = "1000";
+String digits = String.format("%08d", new Random().nextInt(100000000));
+String candidate = prefix + digits;
+while (accountRepository.existsByAccountNumber(candidate)) {
+digits = String.format("%08d", new Random().nextInt(100000000));
+candidate = prefix + digits;
+}
+return candidate;
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/controller/AdminController.java
+================================================================================
+package com.demo.bank.controller;
+
+import com.demo.bank.dto.*;
+import com.demo.bank.service.AdminService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/admin")
+@RequiredArgsConstructor
+public class AdminController {
+
+private final AdminService adminService;
+
+@GetMapping("/stats")
+public ResponseEntity<Map<String, Object>> getStats() {
+return ResponseEntity.ok(adminService.getStats());
+}
+
+@GetMapping("/customers")
+public ResponseEntity<List<UserResponse>> getCustomers(
+@RequestParam(required = false) String search) {
+return ResponseEntity.ok(adminService.getCustomers(search));
+}
+
+@PatchMapping("/accounts/{id}/status")
+public ResponseEntity<AccountResponse> toggleStatus(@PathVariable Long id) {
+return ResponseEntity.ok(adminService.toggleAccountStatus(id));
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/controller/AuthController.java
+================================================================================
+package com.demo.bank.controller;
+
+import com.demo.bank.dto.*;
+import com.demo.bank.service.AuthService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+public class AuthController {
+
+private final AuthService authService;
+
+@PostMapping("/login")
+public ResponseEntity<UserResponse> login(@Valid @RequestBody LoginRequest req) {
+return ResponseEntity.ok(authService.login(req));
+}
+
+@PostMapping("/register")
+public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest req) {
+return ResponseEntity.ok(authService.register(req));
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/controller/GlobalExceptionHandler.java
+================================================================================
+package com.demo.bank.controller;
+
+import com.demo.bank.dto.ApiError;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.*;
+import java.util.stream.Collectors;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+@ExceptionHandler(RuntimeException.class)
+public ResponseEntity<ApiError> handleRuntime(RuntimeException ex) {
+return ResponseEntity.badRequest()
+.body(ApiError.of(ex.getMessage(), HttpStatus.BAD_REQUEST.value()));
+}
+
+@ExceptionHandler(MethodArgumentNotValidException.class)
+public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex) {
+String message = ex.getBindingResult().getFieldErrors()
+.stream()
+.map(FieldError::getDefaultMessage)
+.collect(Collectors.joining(", "));
+return ResponseEntity.badRequest()
+.body(ApiError.of(message, HttpStatus.BAD_REQUEST.value()));
+}
+
+@ExceptionHandler(Exception.class)
+public ResponseEntity<ApiError> handleGeneral(Exception ex) {
+return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+.body(ApiError.of("Internal server error: " + ex.getMessage(), 500));
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/controller/TransactionController.java
+================================================================================
+package com.demo.bank.controller;
+
+import com.demo.bank.dto.*;
+import com.demo.bank.entity.Transaction;
+import com.demo.bank.service.TransactionService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/transactions")
+@RequiredArgsConstructor
+public class TransactionController {
+
+private final TransactionService transactionService;
+
+@GetMapping
+public ResponseEntity<List<TransactionResponse>> getTransactions(@RequestParam Long accountId) {
+return ResponseEntity.ok(transactionService.getTransactions(accountId));
+}
+
+@GetMapping("/paged")
+public ResponseEntity<Page<TransactionResponse>> getTransactionsPaged(
+@RequestParam Long accountId,
+@RequestParam(required = false) Transaction.TransactionType type,
+@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
+@RequestParam(defaultValue = "0") int page,
+@RequestParam(defaultValue = "10") int size) {
+return ResponseEntity.ok(transactionService.getTransactionsPaged(accountId, type, from, to, page, size));
+}
+
+@PostMapping("/deposit")
+public ResponseEntity<TransactionResponse> deposit(@Valid @RequestBody TransactionRequest req) {
+return ResponseEntity.ok(transactionService.deposit(req));
+}
+
+@PostMapping("/withdraw")
+public ResponseEntity<TransactionResponse> withdraw(@Valid @RequestBody TransactionRequest req) {
+return ResponseEntity.ok(transactionService.withdraw(req));
+}
+
+@PostMapping("/transfer")
+public ResponseEntity<TransactionResponse> transfer(@Valid @RequestBody TransactionRequest req) {
+return ResponseEntity.ok(transactionService.transfer(req));
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/AccountResponse.java
+================================================================================
+package com.demo.bank.dto;
+
+import com.demo.bank.entity.Account;
+import lombok.Builder;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+public class AccountResponse {
+private Long id;
+private String accountNumber;
+private Account.AccountType accountType;
+private BigDecimal balance;
+private BigDecimal minimumBalance;
+private BigDecimal availableCredit;
+private Account.AccountStatus status;
+private LocalDateTime createdAt;
+private Long userId;
+private String ownerName;
+
+public static AccountResponse from(Account account) {
+return AccountResponse.builder()
+.id(account.getId())
+.accountNumber(account.getAccountNumber())
+.accountType(account.getAccountType())
+.balance(account.getBalance())
+.minimumBalance(account.getMinimumBalance())
+.availableCredit(account.getAvailableCredit())
+.status(account.getStatus())
+.createdAt(account.getCreatedAt())
+.userId(account.getUser().getId())
+.ownerName(account.getUser().getName())
+.build();
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/ApiError.java
+================================================================================
+package com.demo.bank.dto;
+
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@Builder
+public class ApiError {
+private String message;
+private int status;
+
+public static ApiError of(String message, int status) {
+return ApiError.builder().message(message).status(status).build();
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/CreateAccountRequest.java
+================================================================================
+package com.demo.bank.dto;
+
+import com.demo.bank.entity.Account;
+import jakarta.validation.constraints.*;
+import lombok.Data;
+import java.math.BigDecimal;
+
+@Data
+public class CreateAccountRequest {
+
+@NotNull(message = "User ID is required")
+private Long userId;
+
+@NotNull(message = "Account type is required")
+private Account.AccountType accountType;
+
+@NotNull(message = "Initial deposit is required")
+@DecimalMin(value = "500.00", message = "Minimum initial deposit is ₹500")
+private BigDecimal initialDeposit;
+
+private String nickname;
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/LoginRequest.java
+================================================================================
+package com.demo.bank.dto;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class LoginRequest {
+@NotBlank(message = "Email is required")
+@Email(message = "Invalid email format")
+private String email;
+
+@NotBlank(message = "Password is required")
+private String password;
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/RegisterRequest.java
+================================================================================
+package com.demo.bank.dto;
+
+import com.demo.bank.entity.Account;
+import jakarta.validation.constraints.*;
+import lombok.Data;
+import java.math.BigDecimal;
+
+@Data
+public class RegisterRequest {
+@NotBlank(message = "Name is required")
+private String name;
+
+@NotBlank(message = "Email is required")
+@Email(message = "Invalid email format")
+private String email;
+
+@NotBlank(message = "Phone is required")
+@Pattern(regexp = "^[+]?[0-9]{10,15}$", message = "Invalid phone number")
+private String phone;
+
+@NotBlank(message = "Password is required")
+@Size(min = 6, message = "Password must be at least 6 characters")
+private String password;
+
+@NotNull(message = "Account type is required")
+private Account.AccountType accountType;
+
+@NotNull(message = "Initial deposit is required")
+@DecimalMin(value = "500.00", message = "Minimum initial deposit is 500")
+private BigDecimal initialDeposit;
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/TransactionRequest.java
+================================================================================
+package com.demo.bank.dto;
+
+import jakarta.validation.constraints.*;
+import lombok.Data;
+import java.math.BigDecimal;
+
+@Data
+public class TransactionRequest {
+@NotNull(message = "Account ID is required")
+private Long accountId;
+
+@NotNull(message = "Amount is required")
+@DecimalMin(value = "1.00", message = "Minimum amount is 1.00")
+private BigDecimal amount;
+
+private String description;
+
+private String category;
+
+// For transfers only
+private String toAccountNumber;
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/TransactionResponse.java
+================================================================================
+package com.demo.bank.dto;
+
+import com.demo.bank.entity.Transaction;
+import lombok.Builder;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+public class TransactionResponse {
+private Long id;
+private Transaction.TransactionType type;
+private BigDecimal amount;
+private BigDecimal balanceAfter;
+private String description;
+private String counterpartyAccount;
+private String category;
+private Transaction.TransactionStatus status;
+private LocalDateTime createdAt;
+private Long accountId;
+private String accountNumber;
+
+public static TransactionResponse from(Transaction t) {
+return TransactionResponse.builder()
+.id(t.getId())
+.type(t.getType())
+.amount(t.getAmount())
+.balanceAfter(t.getBalanceAfter())
+.description(t.getDescription())
+.counterpartyAccount(t.getCounterpartyAccount())
+.category(t.getCategory())
+.status(t.getStatus())
+.createdAt(t.getCreatedAt())
+.accountId(t.getAccount().getId())
+.accountNumber(t.getAccount().getAccountNumber())
+.build();
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/dto/UserResponse.java
+================================================================================
+package com.demo.bank.dto;
+
+import com.demo.bank.entity.User;
+import lombok.Builder;
+import lombok.Data;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Data
+@Builder
+public class UserResponse {
+private Long id;
+private String name;
+private String email;
+private String phone;
+private User.Role role;
+private boolean active;
+private LocalDateTime createdAt;
+private List<AccountResponse> accounts;
+
+public static UserResponse from(User user) {
+return UserResponse.builder()
+.id(user.getId())
+.name(user.getName())
+.email(user.getEmail())
+.phone(user.getPhone())
+.role(user.getRole())
+.active(user.isActive())
+.createdAt(user.getCreatedAt())
+.build();
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/entity/Account.java
+================================================================================
+package com.demo.bank.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Entity
+@Table(name = "accounts")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Account {
+
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+private Long id;
+
+@Column(nullable = false, unique = true)
+private String accountNumber;
+
+@Enumerated(EnumType.STRING)
+@Column(nullable = false)
+private AccountType accountType;
+
+@Column(nullable = false, precision = 19, scale = 2)
+private BigDecimal balance;
+
+@Column(nullable = false, precision = 19, scale = 2)
+private BigDecimal minimumBalance;
+
+@Column(nullable = false, precision = 19, scale = 2)
+private BigDecimal availableCredit;
+
+@Enumerated(EnumType.STRING)
+@Column(nullable = false)
+private AccountStatus status;
+
+@Column(nullable = false)
+private LocalDateTime createdAt;
+
+@ManyToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "user_id", nullable = false)
+@ToString.Exclude
+@EqualsAndHashCode.Exclude
+private User user;
+
+@OneToMany(mappedBy = "account", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+@ToString.Exclude
+@EqualsAndHashCode.Exclude
+private List<Transaction> transactions;
+
+public enum AccountType {
+SAVINGS, CURRENT
+}
+
+public enum AccountStatus {
+ACTIVE, FROZEN, CLOSED
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/entity/Transaction.java
+================================================================================
+package com.demo.bank.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "transactions")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Transaction {
+
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+private Long id;
+
+@Enumerated(EnumType.STRING)
+@Column(nullable = false)
+private TransactionType type;
+
+@Column(nullable = false, precision = 19, scale = 2)
+private BigDecimal amount;
+
+@Column(nullable = false, precision = 19, scale = 2)
+private BigDecimal balanceAfter;
+
+private String description;
+
+// For transfers: the other account number
+private String counterpartyAccount;
+
+private String category;
+
+@Enumerated(EnumType.STRING)
+@Column(nullable = false)
+private TransactionStatus status;
+
+@Column(nullable = false)
+private LocalDateTime createdAt;
+
+@ManyToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "account_id", nullable = false)
+@ToString.Exclude
+@EqualsAndHashCode.Exclude
+private Account account;
+
+public enum TransactionType {
+DEPOSIT, WITHDRAWAL, TRANSFER_OUT, TRANSFER_IN
+}
+
+public enum TransactionStatus {
+COMPLETED, PENDING, FAILED
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/entity/User.java
+================================================================================
+package com.demo.bank.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Entity
+@Table(name = "users")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User {
+
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+private Long id;
+
+@Column(nullable = false)
+private String name;
+
+@Column(nullable = false, unique = true)
+private String email;
+
+@Column(nullable = false)
+private String phone;
+
+@Column(nullable = false)
+private String password;
+
+@Enumerated(EnumType.STRING)
+@Column(nullable = false)
+private Role role;
+
+@Column(nullable = false)
+private boolean active = true;
+
+@Column(nullable = false)
+private LocalDateTime createdAt;
+
+@OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+@ToString.Exclude
+@EqualsAndHashCode.Exclude
+private List<Account> accounts;
+
+public enum Role {
+CUSTOMER, ADMIN
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/repository/AccountRepository.java
+================================================================================
+package com.demo.bank.repository;
+
+import com.demo.bank.entity.Account;
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.List;
+import java.util.Optional;
+
+public interface AccountRepository extends JpaRepository<Account, Long> {
+List<Account> findByUserId(Long userId);
+Optional<Account> findByAccountNumber(String accountNumber);
+boolean existsByAccountNumber(String accountNumber);
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/repository/TransactionRepository.java
+================================================================================
+package com.demo.bank.repository;
+
+import com.demo.bank.entity.Transaction;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import java.time.LocalDateTime;
+import java.util.List;
+
+public interface TransactionRepository extends JpaRepository<Transaction, Long> {
+
+List<Transaction> findByAccountIdOrderByCreatedAtDesc(Long accountId);
+
+Page<Transaction> findByAccountIdOrderByCreatedAtDesc(Long accountId, Pageable pageable);
+
+@Query("SELECT t FROM Transaction t WHERE t.account.id = :accountId " +
+"AND (:type IS NULL OR t.type = :type) " +
+"AND (:from IS NULL OR t.createdAt >= :from) " +
+"AND (:to IS NULL OR t.createdAt <= :to) " +
+"ORDER BY t.createdAt DESC")
+Page<Transaction> findFiltered(
+@Param("accountId") Long accountId,
+@Param("type") Transaction.TransactionType type,
+@Param("from") LocalDateTime from,
+@Param("to") LocalDateTime to,
+Pageable pageable);
+
+@Query("SELECT COUNT(t) FROM Transaction t WHERE t.createdAt >= :startOfDay")
+long countTodayTransactions(@Param("startOfDay") LocalDateTime startOfDay);
+
+@Query("SELECT t FROM Transaction t ORDER BY t.createdAt DESC")
+List<Transaction> findRecentAll(Pageable pageable);
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/repository/UserRepository.java
+================================================================================
+package com.demo.bank.repository;
+
+import com.demo.bank.entity.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.Optional;
+import java.util.List;
+
+public interface UserRepository extends JpaRepository<User, Long> {
+Optional<User> findByEmail(String email);
+boolean existsByEmail(String email);
+List<User> findByRoleAndNameContainingIgnoreCaseOrRoleAndEmailContainingIgnoreCase(
+User.Role role1, String name, User.Role role2, String email);
+List<User> findByRole(User.Role role);
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/seed/DataSeeder.java
+================================================================================
+package com.demo.bank.seed;
+
+import com.demo.bank.entity.*;
+import com.demo.bank.repository.*;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.stereotype.Component;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Random;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class DataSeeder implements CommandLineRunner {
+
+private final UserRepository userRepository;
+private final AccountRepository accountRepository;
+private final TransactionRepository transactionRepository;
+
+private final Random rng = new Random(42);
+
+@Override
+public void run(String... args) {
+log.info("Seeding demo data...");
+
+// --- Admin ---
+User admin = saveUser("Admin User", "admin@bank.com", "+19001234567", "admin123", User.Role.ADMIN);
+
+// --- Customer 1: Alice ---
+User alice = saveUser("Alice Johnson", "demo@bank.com", "+12125550100", "demo123", User.Role.CUSTOMER);
+Account aliceSavings = saveAccount("100000000001", Account.AccountType.SAVINGS,
+new BigDecimal("24580.00"), new BigDecimal("500"), new BigDecimal("15000"), alice);
+Account aliceCurrent = saveAccount("100000000002", Account.AccountType.CURRENT,
+new BigDecimal("8350.75"), new BigDecimal("1000"), new BigDecimal("25000"), alice);
+Account aliceCredit = saveAccount("100000000003", Account.AccountType.SAVINGS,
+new BigDecimal("5200.00"), new BigDecimal("500"), new BigDecimal("10000"), alice);
+
+// --- Customer 2: Bob ---
+User bob = saveUser("Bob Martinez", "bob@bank.com", "+12125550200", "bob123", User.Role.CUSTOMER);
+Account bobSavings = saveAccount("100000000004", Account.AccountType.SAVINGS,
+new BigDecimal("12430.50"), new BigDecimal("500"), new BigDecimal("10000"), bob);
+Account bobCurrent = saveAccount("100000000005", Account.AccountType.CURRENT,
+new BigDecimal("3780.25"), new BigDecimal("1000"), new BigDecimal("20000"), bob);
+Account bobExtra = saveAccount("100000000006", Account.AccountType.CURRENT,
+new BigDecimal("950.00"), new BigDecimal("1000"), new BigDecimal("5000"), bob);
+
+// Seed 30 transactions spread across accounts
+seedTransactions(aliceSavings, aliceCurrent);
+seedTransactions(bobSavings, bobCurrent);
+
+log.info("Demo data seeded successfully.");
+log.info(" Admin: admin@bank.com / admin123");
+log.info(" Customer: demo@bank.com / demo123");
+log.info(" Customer: bob@bank.com / bob123");
+}
+
+private User saveUser(String name, String email, String phone, String password, User.Role role) {
+User u = User.builder()
+.name(name).email(email).phone(phone).password(password)
+.role(role).active(true).createdAt(LocalDateTime.now().minusDays(rng.nextInt(200)))
+.build();
+return userRepository.save(u);
+}
+
+private Account saveAccount(String number, Account.AccountType type, BigDecimal balance,
+BigDecimal minBalance, BigDecimal credit, User user) {
+Account a = Account.builder()
+.accountNumber(number).accountType(type).balance(balance)
+.minimumBalance(minBalance).availableCredit(credit)
+.status(Account.AccountStatus.ACTIVE)
+.createdAt(LocalDateTime.now().minusDays(rng.nextInt(180)))
+.user(user).build();
+return accountRepository.save(a);
+}
+
+private void seedTransactions(Account primary, Account secondary) {
+String[] categories = {"Food", "Shopping", "Transport", "Utilities", "Entertainment", "Health", "Income", "Transfer"};
+String[] descs = {"Grocery Store", "Amazon Purchase", "Uber Ride", "Electric Bill",
+"Netflix", "Pharmacy", "Salary Credit", "Online Transfer",
+"Restaurant", "Fuel", "Insurance Premium", "ATM Withdrawal",
+"Rent Payment", "Freelance Income", "Mobile Recharge"};
+
+for (int i = 0; i < 15; i++) {
+Transaction.TransactionType type;
+int r = rng.nextInt(4);
+if (r == 0) type = Transaction.TransactionType.DEPOSIT;
+else if (r == 1) type = Transaction.TransactionType.WITHDRAWAL;
+else if (r == 2) type = Transaction.TransactionType.TRANSFER_OUT;
+else type = Transaction.TransactionType.TRANSFER_IN;
+
+BigDecimal amount = BigDecimal.valueOf(50 + rng.nextInt(2950)).setScale(2);
+BigDecimal balanceAfter = primary.getBalance().add(
+(type == Transaction.TransactionType.DEPOSIT || type == Transaction.TransactionType.TRANSFER_IN)
+? amount : amount.negate());
+
+Transaction tx = Transaction.builder()
+.type(type)
+.amount(amount)
+.balanceAfter(balanceAfter.max(BigDecimal.valueOf(500)))
+.description(descs[rng.nextInt(descs.length)])
+.category(categories[rng.nextInt(categories.length)])
+.counterpartyAccount(type == Transaction.TransactionType.TRANSFER_OUT
+? secondary.getAccountNumber() : null)
+.status(Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now().minusDays(rng.nextInt(60)).minusHours(rng.nextInt(24)))
+.account(primary)
+.build();
+transactionRepository.save(tx);
+}
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/service/AdminService.java
+================================================================================
+package com.demo.bank.service;
+
+import com.demo.bank.dto.*;
+import com.demo.bank.entity.*;
+import com.demo.bank.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+public class AdminService {
+
+private final UserRepository userRepository;
+private final AccountRepository accountRepository;
+private final TransactionRepository transactionRepository;
+
+public List<UserResponse> getCustomers(String search) {
+List<User> users;
+if (search != null && !search.isBlank()) {
+users = userRepository.findByRoleAndNameContainingIgnoreCaseOrRoleAndEmailContainingIgnoreCase(
+User.Role.CUSTOMER, search, User.Role.CUSTOMER, search);
+} else {
+users = userRepository.findByRole(User.Role.CUSTOMER);
+}
+
+return users.stream().map(u -> {
+UserResponse r = UserResponse.from(u);
+List<AccountResponse> accounts = accountRepository.findByUserId(u.getId())
+.stream().map(AccountResponse::from).toList();
+r.setAccounts(accounts);
+return r;
+}).toList();
+}
+
+@Transactional
+public AccountResponse toggleAccountStatus(Long accountId) {
+Account account = accountRepository.findById(accountId)
+.orElseThrow(() -> new RuntimeException("Account not found"));
+
+account.setStatus(account.getStatus() == Account.AccountStatus.ACTIVE
+? Account.AccountStatus.FROZEN : Account.AccountStatus.ACTIVE);
+accountRepository.save(account);
+return AccountResponse.from(account);
+}
+
+public Map<String, Object> getStats() {
+long totalCustomers = userRepository.findByRole(User.Role.CUSTOMER).size();
+
+BigDecimal totalDeposits = accountRepository.findAll()
+.stream()
+.map(Account::getBalance)
+.reduce(BigDecimal.ZERO, BigDecimal::add);
+
+LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+long todayTransactions = transactionRepository.countTodayTransactions(startOfDay);
+
+List<TransactionResponse> recent = transactionRepository
+.findRecentAll(PageRequest.of(0, 10))
+.stream().map(TransactionResponse::from).toList();
+
+Map<String, Object> stats = new LinkedHashMap<>();
+stats.put("totalCustomers", totalCustomers);
+stats.put("totalDeposits", totalDeposits);
+stats.put("todayTransactions", todayTransactions);
+stats.put("recentTransactions", recent);
+return stats;
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/service/AuthService.java
+================================================================================
+package com.demo.bank.service;
+
+import com.demo.bank.dto.*;
+import com.demo.bank.entity.*;
+import com.demo.bank.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Random;
+
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+
+private final UserRepository userRepository;
+private final AccountRepository accountRepository;
+private final TransactionRepository transactionRepository;
+
+public UserResponse login(LoginRequest req) {
+User user = userRepository.findByEmail(req.getEmail())
+.orElseThrow(() -> new RuntimeException("Invalid email or password"));
+
+if (!user.getPassword().equals(req.getPassword())) {
+throw new RuntimeException("Invalid email or password");
+}
+if (!user.isActive()) {
+throw new RuntimeException("Account is frozen. Contact support.");
+}
+
+UserResponse response = UserResponse.from(user);
+List<AccountResponse> accounts = accountRepository.findByUserId(user.getId())
+.stream().map(AccountResponse::from).toList();
+response.setAccounts(accounts);
+return response;
+}
+
+@Transactional
+public UserResponse register(RegisterRequest req) {
+if (userRepository.existsByEmail(req.getEmail())) {
+throw new RuntimeException("Email already registered");
+}
+
+User user = User.builder()
+.name(req.getName())
+.email(req.getEmail())
+.phone(req.getPhone())
+.password(req.getPassword())
+.role(User.Role.CUSTOMER)
+.active(true)
+.createdAt(LocalDateTime.now())
+.build();
+userRepository.save(user);
+
+BigDecimal minBalance = req.getAccountType() == Account.AccountType.SAVINGS
+? BigDecimal.valueOf(500) : BigDecimal.valueOf(1000);
+
+Account account = Account.builder()
+.accountNumber(generateAccountNumber())
+.accountType(req.getAccountType())
+.balance(req.getInitialDeposit())
+.minimumBalance(minBalance)
+.availableCredit(BigDecimal.valueOf(10000))
+.status(Account.AccountStatus.ACTIVE)
+.createdAt(LocalDateTime.now())
+.user(user)
+.build();
+accountRepository.save(account);
+
+if (req.getInitialDeposit() != null && req.getInitialDeposit().compareTo(BigDecimal.ZERO) > 0) {
+Transaction initialTx = Transaction.builder()
+.type(Transaction.TransactionType.DEPOSIT)
+.amount(req.getInitialDeposit())
+.balanceAfter(req.getInitialDeposit())
+.description("Initial Deposit - Account Opening")
+.category("Deposit")
+.status(Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now())
+.account(account)
+.build();
+transactionRepository.save(initialTx);
+}
+
+UserResponse response = UserResponse.from(user);
+response.setAccounts(List.of(AccountResponse.from(account)));
+return response;
+}
+
+private String generateAccountNumber() {
+String prefix = "1000";
+String digits = String.format("%08d", new Random().nextInt(100000000));
+String candidate = prefix + digits;
+while (accountRepository.existsByAccountNumber(candidate)) {
+digits = String.format("%08d", new Random().nextInt(100000000));
+candidate = prefix + digits;
+}
+return candidate;
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/java/com/demo/bank/service/TransactionService.java
+================================================================================
+package com.demo.bank.service;
+
+import com.demo.bank.dto.*;
+import com.demo.bank.entity.*;
+import com.demo.bank.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class TransactionService {
+
+private final AccountRepository accountRepository;
+private final TransactionRepository transactionRepository;
+
+@Transactional
+public TransactionResponse deposit(TransactionRequest req) {
+Account account = getActiveAccount(req.getAccountId());
+
+account.setBalance(account.getBalance().add(req.getAmount()));
+accountRepository.save(account);
+
+Transaction tx = Transaction.builder()
+.type(Transaction.TransactionType.DEPOSIT)
+.amount(req.getAmount())
+.balanceAfter(account.getBalance())
+.description(req.getDescription() != null ? req.getDescription() : "Deposit")
+.category(req.getCategory() != null ? req.getCategory() : "Income")
+.status(Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now())
+.account(account)
+.build();
+transactionRepository.save(tx);
+
+return TransactionResponse.from(tx);
+}
+
+@Transactional
+public TransactionResponse withdraw(TransactionRequest req) {
+Account account = getActiveAccount(req.getAccountId());
+
+BigDecimal newBalance = account.getBalance().subtract(req.getAmount());
+if (newBalance.compareTo(account.getMinimumBalance()) < 0) {
+throw new RuntimeException("Insufficient funds. Minimum balance of ₹"
++ account.getMinimumBalance() + " must be maintained.");
+}
+
+account.setBalance(newBalance);
+accountRepository.save(account);
+
+Transaction tx = Transaction.builder()
+.type(Transaction.TransactionType.WITHDRAWAL)
+.amount(req.getAmount())
+.balanceAfter(account.getBalance())
+.description(req.getDescription() != null ? req.getDescription() : "Withdrawal")
+.category(req.getCategory() != null ? req.getCategory() : "Expense")
+.status(Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now())
+.account(account)
+.build();
+transactionRepository.save(tx);
+
+return TransactionResponse.from(tx);
+}
+
+@Transactional
+public TransactionResponse transfer(TransactionRequest req) {
+if (req.getToAccountNumber() == null || req.getToAccountNumber().isBlank()) {
+throw new RuntimeException("Destination account number is required");
+}
+
+Account from = getActiveAccount(req.getAccountId());
+
+Account to = accountRepository.findByAccountNumber(req.getToAccountNumber())
+.orElseThrow(() -> new RuntimeException("Destination account not found"));
+
+if (to.getStatus() != Account.AccountStatus.ACTIVE) {
+throw new RuntimeException("Destination account is not active");
+}
+
+if (from.getId().equals(to.getId())) {
+throw new RuntimeException("Cannot transfer to the same account");
+}
+
+BigDecimal newFromBalance = from.getBalance().subtract(req.getAmount());
+if (newFromBalance.compareTo(from.getMinimumBalance()) < 0) {
+throw new RuntimeException("Insufficient funds. Cannot transfer below minimum balance of ₹" + from.getMinimumBalance());
+}
+
+from.setBalance(newFromBalance);
+to.setBalance(to.getBalance().add(req.getAmount()));
+accountRepository.save(from);
+accountRepository.save(to);
+
+String desc = req.getDescription() != null ? req.getDescription() : "Transfer";
+
+// Debit entry for sender
+Transaction outTx = Transaction.builder()
+.type(Transaction.TransactionType.TRANSFER_OUT)
+.amount(req.getAmount())
+.balanceAfter(from.getBalance())
+.description(desc + " to " + to.getAccountNumber())
+.counterpartyAccount(to.getAccountNumber())
+.category("Transfer")
+.status(Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now())
+.account(from)
+.build();
+transactionRepository.save(outTx);
+
+// Credit entry for receiver
+Transaction inTx = Transaction.builder()
+.type(Transaction.TransactionType.TRANSFER_IN)
+.amount(req.getAmount())
+.balanceAfter(to.getBalance())
+.description(desc + " from " + from.getAccountNumber())
+.counterpartyAccount(from.getAccountNumber())
+.category("Transfer")
+.status(Transaction.TransactionStatus.COMPLETED)
+.createdAt(LocalDateTime.now())
+.account(to)
+.build();
+transactionRepository.save(inTx);
+
+return TransactionResponse.from(outTx);
+}
+
+public List<TransactionResponse> getTransactions(Long accountId) {
+return transactionRepository.findByAccountIdOrderByCreatedAtDesc(accountId)
+.stream().map(TransactionResponse::from).toList();
+}
+
+public Page<TransactionResponse> getTransactionsPaged(
+Long accountId, Transaction.TransactionType type,
+LocalDateTime from, LocalDateTime to, int page, int size) {
+return transactionRepository.findFiltered(accountId, type, from, to,
+PageRequest.of(page, size)).map(TransactionResponse::from);
+}
+
+private Account getActiveAccount(Long id) {
+Account account = accountRepository.findById(id)
+.orElseThrow(() -> new RuntimeException("Account not found"));
+if (account.getStatus() != Account.AccountStatus.ACTIVE) {
+throw new RuntimeException("Account is not active");
+}
+return account;
+}
+}
+
+
+================================================================================
+FILE: backend/src/main/resources/application.properties
+================================================================================
+spring.application.name=bank-demo
+
+# H2 in-memory database
+spring.datasource.url=jdbc:h2:mem:bankdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+spring.datasource.driver-class-name=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=
+
+# JPA
+spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+spring.jpa.hibernate.ddl-auto=create-drop
+spring.jpa.show-sql=false
+
+# H2 console (optional, for debugging)
+spring.h2.console.enabled=true
+spring.h2.console.path=/h2-console
+
+# Server
+server.port=8080
+
+
+================================================================================
+FILE: frontend/index.html
+================================================================================
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NexaBank — Modern Banking</title>
+<meta name="description" content="NexaBank - Your modern digital banking platform for seamless money management." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231E88E5'/><text y='72' x='12' font-size='70' font-family='Inter,sans-serif' fill='white' font-weight='800'>N</text></svg>" />
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
+
+
+================================================================================
+FILE: frontend/package.json
+================================================================================
+{
+"name": "bank-frontend",
+"private": true,
+"version": "0.0.1",
+"type": "module",
+"scripts": {
+"dev": "vite",
+"build": "vite build",
+"preview": "vite preview"
+},
+"dependencies": {
+"react": "^18.3.1",
+"react-dom": "^18.3.1",
+"react-router-dom": "^6.26.0",
+"axios": "^1.7.7",
+"recharts": "^2.12.7",
+"lucide-react": "^0.441.0",
+"react-hot-toast": "^2.4.1",
+"framer-motion": "^11.5.4",
+"date-fns": "^3.6.0"
+},
+"devDependencies": {
+"@types/react": "^18.3.5",
+"@types/react-dom": "^18.3.0",
+"@vitejs/plugin-react": "^4.3.1",
+"autoprefixer": "^10.4.20",
+"postcss": "^8.4.47",
+"tailwindcss": "^3.4.13",
+"vite": "^5.4.8"
+},
+"allowScripts": {
+"esbuild@0.21.5": true,
+"fsevents@2.3.3": true
+}
+}
+
+
+================================================================================
+FILE: frontend/postcss.config.js
+================================================================================
+export default {
+plugins: {
+tailwindcss: {},
+autoprefixer: {},
+},
+}
+
+
+================================================================================
+FILE: frontend/public/_redirects
+================================================================================
+/* /index.html 200
+
+
+================================================================================
+FILE: frontend/src/api/index.js
+================================================================================
+import axios from 'axios'
+
+const api = axios.create({
+baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+headers: { 'Content-Type': 'application/json' },
+timeout: 10000,
+})
+
+// Response interceptor: unwrap data, handle errors
+api.interceptors.response.use(
+(response) => response.data,
+(error) => {
+const message = error.response?.data?.message || error.message || 'Something went wrong'
+return Promise.reject(new Error(message))
+}
+)
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+export const authApi = {
+login: (data) => api.post('/auth/login', data),
+register: (data) => api.post('/auth/register', data),
+}
+
+// ─── Accounts ─────────────────────────────────────────────────────────────────
+export const accountApi = {
+getByUser: (userId) => api.get('/accounts', { params: { userId } }),
+lookup: (accountNumber) => api.get('/accounts/lookup', { params: { accountNumber } }),
+}
+
+// ─── Transactions ─────────────────────────────────────────────────────────────
+export const transactionApi = {
+getAll: (accountId) => api.get('/transactions', { params: { accountId } }),
+getPaged: (params) => api.get('/transactions/paged', { params }),
+deposit: (data) => api.post('/transactions/deposit', data),
+withdraw: (data) => api.post('/transactions/withdraw', data),
+transfer: (data) => api.post('/transactions/transfer', data),
+}
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+export const adminApi = {
+getStats: () => api.get('/admin/stats'),
+getCustomers: (search) => api.get('/admin/customers', { params: { search } }),
+toggleAccountStatus: (id) => api.patch(`/admin/accounts/${id}/status`),
+}
+
+export default api
+
+
+================================================================================
+FILE: frontend/src/App.jsx
+================================================================================
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { useAuth } from './context/AuthContext'
+import AppLayout from './components/layout/AppLayout'
+import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
+import DashboardPage from './pages/DashboardPage'
+import DepositPage from './pages/DepositPage'
+import WithdrawPage from './pages/WithdrawPage'
+import TransferPage from './pages/TransferPage'
+import TransactionsPage from './pages/TransactionsPage'
+import AdminPage from './pages/admin/AdminPage'
+import SupportPage from './pages/SupportPage'
+import CreateAccountPage from './pages/CreateAccountPage'
+
+function ProtectedRoute({ children, adminOnly = false }) {
+const { user } = useAuth()
+if (!user) return <Navigate to="/login" replace />
+if (adminOnly && user.role !== 'ADMIN') return <Navigate to="/" replace />
+return children
+}
+
+function PublicRoute({ children }) {
+const { user } = useAuth()
+if (user) return <Navigate to="/" replace />
+return children
+}
+
+export default function App() {
+return (
+<Routes>
+{/* Public */}
+<Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+<Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+
+{/* Protected */}
+<Route path="/" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+<Route index element={<DashboardPage />} />
+<Route path="deposit" element={<DepositPage />} />
+<Route path="withdraw" element={<WithdrawPage />} />
+<Route path="transfer" element={<TransferPage />} />
+<Route path="transactions" element={<TransactionsPage />} />
+<Route path="support" element={<SupportPage />} />
+<Route path="create-account" element={<CreateAccountPage />} />
+<Route path="admin" element={
+<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>
+} />
+</Route>
+
+<Route path="*" element={<Navigate to="/" replace />} />
+</Routes>
+)
+}
+
+
+================================================================================
+FILE: frontend/src/components/common/Modal.jsx
+================================================================================
+import { motion, AnimatePresence } from 'framer-motion'
+import { X } from 'lucide-react'
+
+export default function Modal({ open, onClose, title, children, size = 'md' }) {
+const sizes = {
+sm: 'max-w-sm',
+md: 'max-w-md',
+lg: 'max-w-lg',
+xl: 'max-w-2xl',
+}
+
+return (
+<AnimatePresence>
+{open && (
+<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+{/* Backdrop */}
+<motion.div
+initial={{ opacity: 0 }}
+animate={{ opacity: 1 }}
+exit={{ opacity: 0 }}
+onClick={onClose}
+className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+/>
+
+{/* Modal */}
+<motion.div
+initial={{ opacity: 0, scale: 0.92, y: 20 }}
+animate={{ opacity: 1, scale: 1, y: 0 }}
+exit={{ opacity: 0, scale: 0.92, y: 20 }}
+transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+className={`relative w-full ${sizes[size]} bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden`}
+>
+{/* Header */}
+{title && (
+<div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
+<h2 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h2>
+<button
+onClick={onClose}
+className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+>
+<X size={18} className="text-gray-500" />
+</button>
+</div>
+)}
+
+{/* Content */}
+<div className="p-6">{children}</div>
+</motion.div>
+</div>
+)}
+</AnimatePresence>
+)
+}
+
+
+================================================================================
+FILE: frontend/src/components/common/Skeleton.jsx
+================================================================================
+export function SkeletonCard({ className = '' }) {
+return (
+<div className={`card animate-pulse ${className}`}>
+<div className="h-4 skeleton rounded w-1/3 mb-3" />
+<div className="h-8 skeleton rounded w-2/3 mb-2" />
+<div className="h-3 skeleton rounded w-1/2" />
+</div>
+)
+}
+
+export function SkeletonList({ rows = 5 }) {
+return (
+<div className="space-y-3">
+{Array.from({ length: rows }).map((_, i) => (
+<div key={i} className="flex items-center gap-3 animate-pulse">
+<div className="w-10 h-10 skeleton rounded-full flex-shrink-0" />
+<div className="flex-1">
+<div className="h-3.5 skeleton rounded w-1/3 mb-2" />
+<div className="h-3 skeleton rounded w-1/2" />
+</div>
+<div className="h-4 skeleton rounded w-16" />
+</div>
+))}
+</div>
+)
+}
+
+export function SkeletonTable({ rows = 5, cols = 5 }) {
+return (
+<div className="space-y-3 animate-pulse">
+<div className="flex gap-4">
+{Array.from({ length: cols }).map((_, i) => (
+<div key={i} className="h-3.5 skeleton rounded flex-1" />
+))}
+</div>
+{Array.from({ length: rows }).map((_, i) => (
+<div key={i} className="flex gap-4 items-center">
+{Array.from({ length: cols }).map((_, j) => (
+<div key={j} className="h-4 skeleton rounded flex-1" />
+))}
+</div>
+))}
+</div>
+)
+}
+
+
+================================================================================
+FILE: frontend/src/components/common/StatsCard.jsx
+================================================================================
+import { motion } from 'framer-motion'
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+
+export default function StatsCard({ title, value, sub, icon: Icon, trend, color = 'blue', delay = 0 }) {
+const colorMap = {
+blue: { bg: 'bg-blue-50 dark:bg-blue-900/20', icon: 'text-primary-500', border: 'border-blue-100 dark:border-blue-800' },
+emerald: { bg: 'bg-emerald-50 dark:bg-emerald-900/20', icon: 'text-emerald-500', border: 'border-emerald-100 dark:border-emerald-800' },
+purple: { bg: 'bg-purple-50 dark:bg-purple-900/20', icon: 'text-purple-500', border: 'border-purple-100 dark:border-purple-800' },
+amber: { bg: 'bg-amber-50 dark:bg-amber-900/20', icon: 'text-amber-500', border: 'border-amber-100 dark:border-amber-800' },
+rose: { bg: 'bg-rose-50 dark:bg-rose-900/20', icon: 'text-rose-500', border: 'border-rose-100 dark:border-rose-800' },
+}
+const c = colorMap[color] || colorMap.blue
+
+const TrendIcon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : Minus
+const trendColor = trend > 0 ? 'text-emerald-500' : trend < 0 ? 'text-red-500' : 'text-gray-400'
+
+return (
+<motion.div
+initial={{ opacity: 0, y: 20 }}
+animate={{ opacity: 1, y: 0 }}
+transition={{ delay, duration: 0.4, ease: 'easeOut' }}
+className="card card-hover cursor-default"
+>
+<div className="flex items-start justify-between">
+<div className={`p-3 rounded-xl ${c.bg} border ${c.border}`}>
+<Icon size={22} className={c.icon} />
+</div>
+{trend !== undefined && (
+<div className={`flex items-center gap-1 text-xs font-semibold ${trendColor}`}>
+<TrendIcon size={14} />
+<span>{Math.abs(trend)}%</span>
+</div>
+)}
+</div>
+<div className="mt-4">
+<p className="text-sm text-gray-500 dark:text-gray-400 font-medium">{title}</p>
+<p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</p>
+{sub && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{sub}</p>}
+</div>
+</motion.div>
+)
+}
+
+
+================================================================================
+FILE: frontend/src/components/common/TransactionRow.jsx
+================================================================================
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react'
+import { formatCurrency, formatDateTime, getTxColor, getTxPrefix, getTxLabel, isCredit } from '../../utils/helpers'
+import { motion } from 'framer-motion'
+
+const txIcons = {
+DEPOSIT: { Icon: ArrowDownLeft, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-600 dark:text-emerald-400' },
+WITHDRAWAL: { Icon: ArrowUpRight, bg: 'bg-red-100 dark:bg-red-900/30', color: 'text-red-500 dark:text-red-400' },
+TRANSFER_OUT: { Icon: ArrowLeftRight, bg: 'bg-blue-100 dark:bg-blue-900/30', color: 'text-blue-500 dark:text-blue-400' },
+TRANSFER_IN: { Icon: ArrowLeftRight, bg: 'bg-indigo-100 dark:bg-indigo-900/30', color: 'text-indigo-500 dark:text-indigo-400' },
+}
+
+function TransactionRow({ tx, index = 0 }) {
+const { Icon, bg, color } = txIcons[tx.type] || txIcons.DEPOSIT
+
+return (
+<motion.div
+initial={{ opacity: 0, x: -10 }}
+animate={{ opacity: 1, x: 0 }}
+transition={{ delay: index * 0.04 }}
+className="flex items-center gap-4 py-3 px-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+>
+{/* Icon */}
+<div className={`w-10 h-10 rounded
